@@ -1,43 +1,38 @@
 defmodule Twitter do
-  def subscribe(hashtags) when is_list(hashtags) do
+  def start(hashtags) when is_list(hashtags) do
     hashtags
     |> Enum.map(fn(hashtag) ->
-      Task.async(fn -> search(hashtag) end)
+        Task.async(fn -> subscribe(hashtag) end)
       end)
     |> fetch
   end
 
-  def subscribe(hashtag) when is_binary(hashtag) do
-    IO.inspect "------- STARTED for #{hashtag} ---------"
-    Task.async(fn -> search(hashtag) end)
-    |> fetch
+  def start(hashtag) do
+    stream = ExTwitter.stream_filter(track: hashtag)
+    |> Stream.map(fn(tweet) -> %{"text" => tweet.text, "author" => tweet.user.screen_name} end)
+    |> Stream.map(fn(tweet) -> save(tweet, hashtag) end)
+    stream |> Enum.to_list |> IO.inspect
   end
 
   defp fetch(tasks) do
     Enum.each(tasks, fn(task) ->
-      task |> Task.await
+      task |> Task.await(100000)
     end)
   end
 
-  defp search(hashtag) do
-    IO.inspect "-------- subscribing to #{hashtag} ------------"
-    ExTwitter.search(hashtag, [count: 5])
-    |> Enum.map(fn(tweet) -> %{"text" => tweet.text, "author" => tweet.user.screen_name} end)
-    |> save(hashtag)
+  defp subscribe(hashtag) do
+    stream = ExTwitter.stream_filter(track: hashtag)
+    |> Stream.map(fn(tweet) -> %{"text" => tweet.text, "author" => tweet.user.screen_name} end)
+    |> Stream.map(fn(tweet) -> save(tweet, hashtag) end)
+    Enum.to_list(stream)
   end
 
-  defp save(tweets, hashtag) do
-    tweets
-    |> Enum.map(fn(%{"author" => author, "text" => text}) ->
-      IO.inspect "-------- Saving to DB hashTag: #{hashtag} text: #{String.slice(text, 0..25)}"
-      Sqlitex.with_db('db.sqlite3', fn(db) ->
-        Sqlitex.query(
-          db,
-          "INSERT INTO tweets (text, author, hashtag) VALUES ($1, $2, $3)",
-          bind: [text, author, hashtag])
-      end)
+  defp save(%{"author" => author, "text" => text}, hashtag) do
+    Sqlitex.with_db('db.sqlite3', fn(db) ->
+      Sqlitex.query(
+        db,
+        "INSERT INTO tweets (text, author, hashtag) VALUES ($1, $2, $3)",
+        bind: [text, author, hashtag])
     end)
-    IO.inspect "-------- SAVING TO DB DONE for hashtag: #{hashtag}------------"
-
   end
 end
